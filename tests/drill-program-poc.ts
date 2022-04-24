@@ -1,5 +1,5 @@
 import * as anchor from "@project-serum/anchor";
-import { Program } from "@project-serum/anchor";
+import { AnchorError, Program } from "@project-serum/anchor";
 import { DrillProgramPoc } from "../target/types/drill_program_poc";
 import { createAssociatedTokenAccount, createFundedWallet, createMint, mintTo } from "./utils";
 import { PublicKey, Keypair } from '@solana/web3.js';
@@ -15,7 +15,7 @@ describe("drill-program-poc", () => {
   const program = anchor.workspace.DrillProgramPoc as Program<DrillProgramPoc>;
 
   const boardId = 1;
-  const bountyNumber = 2;
+  const bountyId = 2;
   let boardPublicKey: PublicKey;
   let bountyPublicKey: PublicKey;
   let bountyVaultPublicKey: PublicKey;
@@ -37,7 +37,7 @@ describe("drill-program-poc", () => {
     [bountyPublicKey] = await PublicKey.findProgramAddress([
       Buffer.from('bounty', 'utf8'),
       boardPublicKey.toBuffer(),
-      new BN(bountyNumber).toArrayLike(Buffer, "le", 4),
+      new BN(bountyId).toArrayLike(Buffer, "le", 4),
     ], program.programId);
     [bountyVaultPublicKey] = await PublicKey.findProgramAddress([
       Buffer.from('bounty_vault', 'utf8'),
@@ -58,7 +58,7 @@ describe("drill-program-poc", () => {
   it("should initialize board", async () => {
     // act
     await program.methods
-      .initializeBoard(boardId)
+      .initializeBoard(boardId, new BN(0))
       .accounts({
         acceptedMint: acceptedMintPublicKey,
         authority: user1Keypair.publicKey,
@@ -68,12 +68,13 @@ describe("drill-program-poc", () => {
     // assert
     const boardAccount = await program.account.board.fetchNullable(boardPublicKey);
     assert.notEqual(boardAccount, null);
+    assert.ok(boardAccount.authority.equals(user1Keypair.publicKey));
   });
 
   it("should initialize bounty", async () => {
     // act
     await program.methods
-      .initializeBounty(boardId, bountyNumber)
+      .initializeBounty(boardId, bountyId)
       .accounts({
         acceptedMint: acceptedMintPublicKey,
         authority: user1Keypair.publicKey,
@@ -89,7 +90,7 @@ describe("drill-program-poc", () => {
   it("should deposit into bounty", async () => {
     // act
     await program.methods
-      .deposit(boardId, bountyNumber, bountyTotal)
+      .deposit(boardId, bountyId, bountyTotal)
       .accounts({
         authority: user1Keypair.publicKey,
         sponsorVault: user1AssociatedTokenAccount,
@@ -106,7 +107,7 @@ describe("drill-program-poc", () => {
   it("should close bounty", async () => {
     // act
     await program.methods
-      .closeBounty(boardId, bountyNumber, user2Name)
+      .closeBounty(boardId, bountyId, user2Name)
       .accounts({ authority: user1Keypair.publicKey })
       .signers([user1Keypair])
       .rpc();
@@ -120,7 +121,7 @@ describe("drill-program-poc", () => {
   it("should send bounty", async () => {
     // act
     await program.methods
-      .sendBounty(boardId, bountyNumber, user2Name)
+      .sendBounty(boardId, bountyId, user2Name)
       .accounts({ 
         authority: user2Keypair.publicKey,
         userVault: user2AssociatedTokenAccount,
@@ -135,5 +136,72 @@ describe("drill-program-poc", () => {
     assert.equal(bountyAccount, null);
     assert.equal(bountyVaultAccount, null);
     assert.equal(userVaultAccount.amount, BigInt(user2Balance) + BigInt(`0x${bountyTotal.toString('hex')}`));
+  });
+
+  it("should set a new authority", async () => {
+    // act
+    await program.methods
+      .initializeBoard(boardId, new BN(1_000_000_000))
+      .accounts({
+        acceptedMint: acceptedMintPublicKey,
+        authority: user1Keypair.publicKey,
+      })
+      .signers([user1Keypair])
+      .rpc();
+    await program.methods
+      .setBoardAuthority(boardId)
+      .accounts({
+        authority: user1Keypair.publicKey,
+        newAuthority: user2Keypair.publicKey,
+      })
+      .signers([user1Keypair])
+      .rpc();
+    // assert
+    const boardAccount = await program.account.board.fetchNullable(boardPublicKey);
+    assert.ok(boardAccount.authority.equals(user2Keypair.publicKey));
+  });
+
+  it("should fail sending bounty before lock", async () => {
+    // arrange
+    const boardId = 10;
+    const bountyId = 11;
+    let error: AnchorError;
+    // act
+    await program.methods
+      .initializeBoard(boardId, new BN(1_000_000_000))
+      .accounts({
+        acceptedMint: acceptedMintPublicKey,
+        authority: user1Keypair.publicKey,
+      })
+      .signers([user1Keypair])
+      .rpc();
+    await program.methods
+      .initializeBounty(boardId, bountyId)
+      .accounts({
+        acceptedMint: acceptedMintPublicKey,
+        authority: user1Keypair.publicKey,
+      })
+      .signers([user1Keypair])
+      .rpc();
+    await program.methods
+      .closeBounty(boardId, bountyId, user2Name)
+      .accounts({ authority: user1Keypair.publicKey })
+      .signers([user1Keypair])
+      .rpc();
+    try {
+      await program.methods
+        .sendBounty(boardId, bountyId, user2Name)
+        .accounts({ 
+          authority: user2Keypair.publicKey,
+          userVault: user2AssociatedTokenAccount,
+          boardAuthority: user1Keypair.publicKey,
+        })
+        .signers([user2Keypair])
+        .rpc();
+    } catch (err) {
+      error = err;
+    }
+    // assert
+    assert.equal(error.error.errorMessage, 'BountyLockedError');
   });
 });

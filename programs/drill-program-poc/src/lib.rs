@@ -132,7 +132,7 @@ pub mod drill_program_poc {
 )]
 pub struct InitializeBoard<'info> {
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         space = 200,
         seeds = [
@@ -144,7 +144,7 @@ pub struct InitializeBoard<'info> {
     pub board: Box<Account<'info, Board>>,
     pub accepted_mint: Box<Account<'info, Mint>>,
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         seeds = [
             b"board_vault".as_ref(), 
@@ -194,7 +194,7 @@ pub struct InitializeBounty<'info> {
     )]
     pub board: Box<Account<'info, Board>>,
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         space = 200,
         seeds = [
@@ -207,7 +207,7 @@ pub struct InitializeBounty<'info> {
     pub bounty: Box<Account<'info, Bounty>>,
     pub accepted_mint: Box<Account<'info, Mint>>,
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         seeds = [
             b"bounty_vault".as_ref(),
